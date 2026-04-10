@@ -1,0 +1,1 @@
+acaba ilk baştaki yukardaki binary classifieri de tekli ve çoklu grupların iç folderlarından da eşit olcak şekilde alıp önce tekli mi çoklu mu diye sordurtsak burdaki eğitim setini her folderdan min iç dizinlerdeki folderlardan bile min 10 ar tanae alcak şekilde bişeyle eğitsek o nası fikir olurdu peki sence? daha güzel çalışabilir miydi bunu da deneyelim

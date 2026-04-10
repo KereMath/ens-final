@@ -1,0 +1,21 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Processed data (regeneratable)
+processed_data/
+
+# Trained meta models (large)
+meta_models/
+router_model/
+
+# Results
+results/
+
+# Backup files
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
