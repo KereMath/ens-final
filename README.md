@@ -1,71 +1,73 @@
-# Hierarchical Multi-Level Stacked Ensemble for Time Series Base Type and Anomaly Classification
+# Zaman Serisi Base Type ve Anomali Sınıflandırması için Hiyerarşik Çok Katmanlı Stacked Ensemble
 
-A production-grade pipeline combining two pre-trained binary ensemble systems,
-a custom-feature stationarity gate, a learned routing layer, and tuned
-stacking meta-learners to classify time series into 39 distinct behavioral
-categories combining base process types and anomaly patterns.
+Önceden eğitilmiş iki binary ensemble sistemi, özel feature setli bir stationarity
+gate, öğrenilmiş bir routing katmanı ve kalibre edilmiş stacking meta-learner'ları
+birleştiren üretim seviyesi bir pipeline. Zaman serilerini base process tipleri
+ile anomali desenlerini birleştiren 39 farklı davranışsal kategoriye
+sınıflandırır.
 
-**Final Result: 89.07 % FULL match (3919 / 4400)** on out-of-distribution evaluation —
-a **+29.27 percentage point improvement** over the single-ensemble baseline.
+**Nihai Sonuç: %89.07 FULL match (3919 / 4400)** out-of-distribution değerlendirme
+üzerinde — tek ensemble baseline'a göre **+29.27 puan iyileşme**.
 
 ---
 
-## Table of Contents
+## İçindekiler
 
-1. [Motivation and Problem Statement](#motivation-and-problem-statement)
-2. [Dataset and Taxonomy](#dataset-and-taxonomy)
-3. [System Architecture](#system-architecture)
-4. [Component 1 — tsfresh Feature Extraction](#component-1--tsfresh-feature-extraction)
-5. [Component 2 — Old Binary Ensemble (9 detectors)](#component-2--old-binary-ensemble-9-detectors)
-6. [Component 3 — New Binary Ensemble (10 models)](#component-3--new-binary-ensemble-10-models)
-7. [Component 4 — Stationary Detector Gate](#component-4--stationary-detector-gate)
-8. [Component 5 — Single/Combination Router](#component-5--singlecombination-router)
-9. [Component 6 — Stacking Meta-Learners](#component-6--stacking-meta-learners)
-10. [Component 7 — Blended Probability Decision](#component-7--blended-probability-decision)
+1. [Motivasyon ve Problem Tanımı](#motivasyon-ve-problem-tanımı)
+2. [Veri Seti ve Sınıf Taksonomisi](#veri-seti-ve-sınıf-taksonomisi)
+3. [Sistem Mimarisi](#sistem-mimarisi)
+4. [Bileşen 1 — tsfresh Feature Extraction](#bileşen-1--tsfresh-feature-extraction)
+5. [Bileşen 2 — Eski Binary Ensemble (9 detektör)](#bileşen-2--eski-binary-ensemble-9-detektör)
+6. [Bileşen 3 — Yeni Binary Ensemble (10 model)](#bileşen-3--yeni-binary-ensemble-10-model)
+7. [Bileşen 4 — Stationarity Detector Gate](#bileşen-4--stationarity-detector-gate)
+8. [Bileşen 5 — Tekli/Kombinasyon Router](#bileşen-5--teklikombinasyon-router)
+9. [Bileşen 6 — Stacking Meta-Learner'lar](#bileşen-6--stacking-meta-learnerlar)
+10. [Bileşen 7 — Blended Probability Kararı](#bileşen-7--blended-probability-kararı)
 11. [Inference Pipeline](#inference-pipeline)
-12. [Training Data and Balanced Sampling](#training-data-and-balanced-sampling)
-13. [Hyperparameter Search and Calibration](#hyperparameter-search-and-calibration)
-14. [Full Evaluation Results (39 classes)](#full-evaluation-results-39-classes)
-15. [Incremental Improvement History](#incremental-improvement-history)
-16. [File Organization and Reproducibility](#file-organization-and-reproducibility)
-17. [External Model References](#external-model-references)
-18. [Techniques Used — Academic Summary](#techniques-used--academic-summary)
+12. [Training Verisi ve Dengeli Sampling](#training-verisi-ve-dengeli-sampling)
+13. [Hyperparameter Arama ve Kalibrasyon](#hyperparameter-arama-ve-kalibrasyon)
+14. [Tam Değerlendirme Sonuçları (39 sınıf)](#tam-değerlendirme-sonuçları-39-sınıf)
+15. [Kademeli İyileşme Geçmişi](#kademeli-iyileşme-geçmişi)
+16. [Dosya Organizasyonu ve Tekrarlanabilirlik](#dosya-organizasyonu-ve-tekrarlanabilirlik)
+17. [Harici Model Referansları](#harici-model-referansları)
+18. [Kullanılan Teknikler — Akademik Özet](#kullanılan-teknikler--akademik-özet)
 
 ---
 
-## Motivation and Problem Statement
+## Motivasyon ve Problem Tanımı
 
-Given a raw univariate time series sampled as CSV, the task is to assign:
+CSV olarak örneklenmiş ham tek değişkenli zaman serisi verildiğinde, görev
+şu iki çıktıyı üretmektir:
 
-1. **A base process type** (4-way classification): stationary, deterministic trend,
-   stochastic trend, or volatility (heteroskedastic).
-2. **Zero or more anomaly labels** (6-way multi-label): collective, contextual,
-   mean shift, point, trend shift, or variance shift.
+1. **Base process tipi** (4-sınıflı sınıflandırma): stationary, deterministic
+   trend, stochastic trend veya volatility (heteroskedastic).
+2. **Sıfır veya daha fazla anomali etiketi** (6-sınıflı multi-label):
+   collective, contextual, mean shift, point, trend shift veya variance shift.
 
-The evaluation metric is **strict FULL match** — a prediction counts as correct
-only if the base type is identified AND every anomaly present is detected AND
-no spurious anomalies are produced (no false positives). This single-criterion
-evaluation forces the system to be simultaneously accurate on base type
-identification and surgically precise on anomaly detection.
+Değerlendirme metriği **strict FULL match**'tir — bir tahmin ancak ve ancak
+base type doğru tespit edildiyse VE mevcut her anomali algılandıysa VE hiçbir
+yanlış anomali üretilmediyse (no false positives) doğru sayılır. Bu tek
+kriterli değerlendirme, sistemi hem base type tespitinde doğru hem de anomali
+tespitinde cerrahi düzeyde hassas olmaya zorlar.
 
-The 39 source groups span four complexity tiers:
+39 kaynak grup dört karmaşıklık katmanına yayılır:
 
-| Tier | Description | Groups | Example |
+| Katman | Açıklama | Gruplar | Örnek |
 |---|---|---|---|
-| **1. Pure base** | Single process, no anomaly | 1–4 | stationary (1), deterministic_trend (2) |
-| **2. Stationary + single anomaly** | Baseline process + one anomaly | 5–10 | stationary + mean_shift (7) |
-| **3. Deterministic + anomaly** | Trend process + one anomaly | 11–31 | cubic + collective (11), linear + trend_shift (26) |
-| **4. Non-deterministic combinations** | Stochastic / volatility + anomaly | 32–39 | stoch_trend + variance_shift (35) |
+| **1. Saf base** | Tek process, anomali yok | 1–4 | stationary (1), deterministic_trend (2) |
+| **2. Stationary + tek anomali** | Baseline process + bir anomali | 5–10 | stationary + mean_shift (7) |
+| **3. Deterministic + anomali** | Trend process + bir anomali | 11–31 | cubic + collective (11), linear + trend_shift (26) |
+| **4. Deterministic olmayan kombinasyonlar** | Stochastic / volatility + anomali | 32–39 | stoch_trend + variance_shift (35) |
 
 ---
 
-## Dataset and Taxonomy
+## Veri Seti ve Sınıf Taksonomisi
 
-Total evaluation: **4,400 CSV files** drawn from all 39 groups using
-leaf-balanced sampling (10 files per leaf directory). The 39 groups and their
-canonical expected labels are:
+Toplam değerlendirme: **4,400 CSV dosyası**, leaf-balanced sampling ile
+(her leaf dizinden 10 dosya) 39 gruptan çekilmiştir. 39 grup ve kanonik
+beklenen etiketleri:
 
-| # | Group Name | Expected Base | Expected Anomaly | Count |
+| # | Grup Adı | Beklenen Base | Beklenen Anomali | Sayı |
 |---|---|---|---|---|
 | 1 | stationary | stationary | — | 120 |
 | 2 | deterministic_trend | deterministic_trend | — | 720 |
@@ -77,123 +79,123 @@ canonical expected labels are:
 | 8 | point_anomaly | stationary | point_anomaly | 480 |
 | 9 | trend_shift | stationary | trend_shift | 480 |
 | 10 | variance_shift | stationary | variance_shift | 480 |
-| 11–14 | cubic + {collective, mean, point, variance} | deterministic_trend | each | 10–20 |
-| 15–18 | damped + {collective, mean, point, variance} | deterministic_trend | each | 10–20 |
-| 19–22 | exponential + {collective, mean, point, variance} | deterministic_trend | each | 10–20 |
-| 23–27 | linear + {collective, mean, point, trend_shift, variance} | deterministic_trend | each | 10–30 |
-| 28–31 | quadratic + {collective, mean, point, variance} | deterministic_trend | each | 10–20 |
-| 32–35 | stochastic + {collective, mean, point, variance} | stochastic_trend | each | 10–50 |
-| 36–39 | volatility + {collective, mean, point, variance} | volatility | each | 10 |
+| 11–14 | cubic + {collective, mean, point, variance} | deterministic_trend | her biri | 10–20 |
+| 15–18 | damped + {collective, mean, point, variance} | deterministic_trend | her biri | 10–20 |
+| 19–22 | exponential + {collective, mean, point, variance} | deterministic_trend | her biri | 10–20 |
+| 23–27 | linear + {collective, mean, point, trend_shift, variance} | deterministic_trend | her biri | 10–30 |
+| 28–31 | quadratic + {collective, mean, point, variance} | deterministic_trend | her biri | 10–20 |
+| 32–35 | stochastic + {collective, mean, point, variance} | stochastic_trend | her biri | 10–50 |
+| 36–39 | volatility + {collective, mean, point, variance} | volatility | her biri | 10 |
 
 ---
 
-## System Architecture
+## Sistem Mimarisi
 
-The pipeline is a **seven-stage hierarchical ensemble** where each stage
-contributes a distinct inductive bias:
+Pipeline, her aşamanın farklı bir inductive bias kattığı **yedi aşamalı
+hiyerarşik bir ensemble**tir:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  INPUT: raw univariate time series (variable length, min 50 timesteps)  │
+│  GIRDI: ham tek değişkenli zaman serisi (değişken uzunluk, min 50)      │
 └─────────────────────────────────────────────────────────────────────────┘
                 │
-                ├─► Stage A: tsfresh EfficientFC   →  777-dim feature vector
+                ├─► Aşama A: tsfresh EfficientFC   →  777-boyutlu feature vec
                 │
-                ├─► Stage B: Stationary Detector Gate ─────► P(stationary)
-                │   (custom 25 features, XGBoost binary)
+                ├─► Aşama B: Stationarity Detector Gate ─────► P(stationary)
+                │   (özel 25 feature, XGBoost binary)
                 │
-                ├─► Stage C: Old Binary Ensemble   ─────► 9 × P(class_k)
-                │   (9 independent XGBoost/LightGBM/MLP binaries)
+                ├─► Aşama C: Eski Binary Ensemble   ─────► 9 × P(class_k)
+                │   (9 bağımsız XGBoost/LightGBM/MLP binary)
                 │
-                ├─► Stage D: New Binary Ensemble   ─────► 10 × P(class_k)
-                │   (4 base + 6 anomaly, LightGBM/XGBoost binaries)
+                ├─► Aşama D: Yeni Binary Ensemble   ─────► 10 × P(class_k)
+                │   (4 base + 6 anomali, LightGBM/XGBoost binaries)
                 │
-                ├─► Stage E: Feature Engineering
-                │   • 14 derived meta-features
-                │     (agreement, entropy, confidence gaps, max/argmax)
-                │   • Standardized raw tsfresh features (777)
-                │   └────► 810-dim unified meta-vector
+                ├─► Aşama E: Feature Engineering
+                │   • 14 türetilmiş meta-feature
+                │     (agreement, entropy, confidence gap, max/argmax)
+                │   • Standartlaştırılmış ham tsfresh feature'ları (777)
+                │   └────► 810-boyutlu birleşik meta-vektör
                 │
-                ├─► Stage F: Single/Combination Router
-                │   (XGB+LGB binary on 810-dim)  →  P(combination)
+                ├─► Aşama F: Tekli/Kombinasyon Router
+                │   (XGB+LGB binary, 810-boyutlu üzerinde)  →  P(combo)
                 │
-                └─► Stage G: Stacking Meta-Learners
-                    • Base type: XGB+LGB 4-class on 810-dim
-                    • 6 × Anomaly binaries: XGB+LGB
-                      with alpha-blended new-ensemble probability
-                      and per-anomaly tuned threshold
+                └─► Aşama G: Stacking Meta-Learner'lar
+                    • Base type: XGB+LGB 4-sınıflı, 810-boyutlu
+                    • 6 × Anomali binary: XGB+LGB
+                      alpha-blended new-ensemble probability ile
+                      ve per-anomaly tuned threshold ile
 
                     ▼
-                DECISION LOGIC:
-                IF stationary_gate ≥ 0.92:
-                    return (stationary, [])        # Override path
-                ELIF router(combo) < 0.30:
-                    return (base_meta_argmax, [])  # Single path
-                ELSE:
+                KARAR MANTIĞI:
+                EĞER stationary_gate ≥ 0.92:
+                    return (stationary, [])        # Override yolu
+                DEĞILSE EĞER router(combo) < 0.30:
+                    return (base_meta_argmax, [])  # Tekli yol
+                DEĞILSE:
                     return (
                         base_meta_argmax,
                         [a for a in ANOMALIES
                          if α·meta_a + (1-α)·new_a ≥ threshold_a]
-                    )                              # Combination path
+                    )                              # Kombinasyon yolu
                 │
                 ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  OUTPUT: (base_type, [list of detected anomalies])                      │
+│  ÇIKTI: (base_type, [tespit edilen anomalilerin listesi])               │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Each component is described in full technical detail below.
+Her bileşen aşağıda tam teknik detayla açıklanmıştır.
 
 ---
 
-## Component 1 — tsfresh Feature Extraction
+## Bileşen 1 — tsfresh Feature Extraction
 
-**What it is:** An automated, deterministic feature generator that maps a
-variable-length time series to a fixed 777-dimensional feature vector using
-tsfresh's `EfficientFCParameters` (a curated subset excluding the most
-computationally expensive calculators).
+**Nedir:** Değişken uzunluktaki zaman serisini tsfresh'in
+`EfficientFCParameters`'ı (en maliyetli hesaplayıcıları hariç tutan seçilmiş
+bir alt küme) kullanarak sabit 777 boyutlu bir feature vektörüne map eden
+otomatik, deterministik bir feature üretici.
 
-**Why 777 features:** Empirically, this is the upper bound on what tsfresh
-generates for single-variable series with `EfficientFCParameters`.
-The 777 features span:
+**Neden 777 feature:** Ampirik olarak, bu tsfresh'in `EfficientFCParameters`
+ile tek değişkenli seriler için ürettiği üst sınırdır. 777 feature şu
+kategorilere yayılır:
 
-| Feature Family | Approx Count | Examples |
+| Feature Ailesi | Yaklaşık Sayı | Örnekler |
 |---|---|---|
-| Statistical moments | ~20 | mean, std, skewness, kurtosis, quantiles |
-| Autocorrelation | ~100 | `autocorrelation(lag=k)` for k=1..10, partial ACF |
-| Fourier descriptors | ~150 | FFT coefficient real/imaginary, spectral centroid |
-| Wavelet CWT | ~50 | Continuous wavelet transform coefficients |
-| Change metrics | ~80 | `change_quantile`, `cid_ce`, `mean_abs_change` |
+| İstatistiksel momentler | ~20 | mean, std, skewness, kurtosis, quantile'lar |
+| Autocorrelation | ~100 | `autocorrelation(lag=k)` k=1..10 için, partial ACF |
+| Fourier descriptor | ~150 | FFT coefficient reel/sanal, spectral centroid |
+| Wavelet CWT | ~50 | Continuous wavelet transform coefficient'ları |
+| Change metric | ~80 | `change_quantile`, `cid_ce`, `mean_abs_change` |
 | Peak detection | ~30 | `number_peaks(n=k)`, prominence |
 | Distribution | ~40 | `ratio_beyond_r_sigma`, entropy, benford |
-| Linear trend | ~20 | slope, stderr, intercept on raw and sub-series |
-| Nonlinear descriptors | ~50 | `augmented_dickey_fuller`, Lempel-Ziv |
+| Linear trend | ~20 | slope, stderr, intercept (ham ve alt-seriler üzerinde) |
+| Nonlinear descriptor | ~50 | `augmented_dickey_fuller`, Lempel-Ziv |
 | Symbolic aggregation | ~50 | `value_count`, `unique_ratio`, binned counts |
-| Miscellaneous | ~187 | `friedrich_coefficients`, `agg_linear_trend`, etc. |
+| Diğer | ~187 | `friedrich_coefficients`, `agg_linear_trend`, vb. |
 
-**Why this family of features:** tsfresh's extraction is a widely-adopted,
-standard baseline in time series analysis. It's well-tuned for classification
-tasks and captures both local and global temporal characteristics without
-requiring manual engineering. Crucially, **every downstream component in this
-pipeline takes these same 777 features as input**, making them the single
-unifying representation of the series.
+**Neden bu feature ailesi:** tsfresh'in extraction'ı zaman serisi analizinde
+yaygın kabul görmüş standart bir baseline'dır. Sınıflandırma görevleri için
+iyi ayarlanmıştır; manuel engineering gerektirmeden hem lokal hem global
+temporal özellikleri yakalar. Kritik olarak, **pipeline'daki her downstream
+bileşen aynı 777 feature'ı input olarak alır**, bu da serinin tek birleştirici
+gösterimi yapar.
 
-**NaN handling:** tsfresh's `impute()` replaces infinities and NaN values
-with column means/0; we additionally apply `np.nan_to_num()` before any model
-call to guarantee numerical stability.
+**NaN yönetimi:** tsfresh'in `impute()`'u sonsuzluk ve NaN değerlerini sütun
+ortalamaları/0 ile değiştirir; ek olarak her model çağrısından önce sayısal
+stabilite garantisi için `np.nan_to_num()` uygularız.
 
 ---
 
-## Component 2 — Old Binary Ensemble (9 detectors)
+## Bileşen 2 — Eski Binary Ensemble (9 detektör)
 
-**Source:** Loaded from `../tsfresh ensemble/trained_models/`. This ensemble
-was trained independently on **single-label time series data** (each series
-belongs to exactly one of 9 classes).
+**Kaynak:** `../tsfresh ensemble/trained_models/` dizininden yüklenir. Bu
+ensemble **tek etiketli zaman serisi verisi** üzerinde bağımsız olarak
+eğitilmiştir (her seri tam olarak 9 sınıftan birine aittir).
 
-**Architecture:** 9 independent binary detectors, one per class:
+**Mimari:** Her sınıf için bir tane olmak üzere 9 bağımsız binary detektör:
 
 ```
-Classes (ordered for canonical indexing):
+Sınıflar (kanonik indeksleme için sıralı):
   0: collective_anomaly
   1: contextual_anomaly
   2: deterministic_trend
@@ -205,212 +207,210 @@ Classes (ordered for canonical indexing):
   8: volatility
 ```
 
-**Training methodology** (original repo): For each of the 9 classes,
-a separate binary XGBoost / LightGBM / MLP was trained with the target
-class as positive (1) and all other classes as negatives (0). The best
-model per class was selected by **validation F1** and stored alongside
-a per-class `RobustScaler`.
+**Training metodolojisi** (orijinal repo): 9 sınıfın her biri için, hedef
+sınıf positive (1) ve diğer tüm sınıflar negative (0) olacak şekilde ayrı bir
+binary XGBoost / LightGBM / MLP eğitilmiştir. Sınıf başına en iyi model
+**validation F1** ile seçilmiş ve sınıfa özel bir `RobustScaler` ile birlikte
+kaydedilmiştir.
 
-**Output at inference:** 9 probabilities `P(class_k = 1 | tsfresh_features)`.
-These 9 values become the **first 9 components** of the meta-feature vector
-fed to the stacking layer.
+**Inference'da çıktı:** 9 olasılık `P(class_k = 1 | tsfresh_features)`.
+Bu 9 değer stacking katmanına beslenen meta-feature vektörünün **ilk 9
+bileşenini** oluşturur.
 
-**Why retained unchanged:** The old ensemble excels at single-label
-identification ("is this series mean_shift?"). Retraining it would
-require rebuilding its training set and offers no clear advantage —
-but its **per-class opinion** is valuable signal for the meta-learner,
-especially for determining base type on pure trend series (Group 2)
-where it complements the new ensemble's occasional miscalibration.
+**Neden değiştirilmeden korundu:** Eski ensemble tek etiketli tanımlamada
+üstündür ("bu seri mean_shift mi?"). Yeniden eğitim mevcut training setinin
+yeniden kurulmasını gerektirir ve net bir avantaj sunmaz — ancak onun
+**sınıf başına görüşü** meta-learner için değerli bir sinyaldir, özellikle
+saf trend serilerinde (Grup 2) base type belirlenmesinde yeni ensemble'ın
+zaman zaman yaşadığı kalibrasyon sorunlarını tamamlar.
 
 ---
 
-## Component 3 — New Binary Ensemble (10 models)
+## Bileşen 3 — Yeni Binary Ensemble (10 model)
 
-**Source:** Loaded from `../ensemble-alldata/trained_models/`. Trained
-independently on **combination data** (base process plus one anomaly per
-series).
+**Kaynak:** `../ensemble-alldata/trained_models/` dizininden yüklenir.
+**Kombinasyon verisi** üzerinde bağımsız olarak eğitilmiştir (base process +
+seri başına bir anomali).
 
-**Architecture:** 10 independent binary models covering:
+**Mimari:** Aşağıdakileri kapsayan 10 bağımsız binary model:
 
-| Index | Model Name | Type |
+| Indeks | Model Adı | Tip |
 |---|---|---|
 | 0 | stationary | base |
 | 1 | deterministic_trend | base |
 | 2 | stochastic_trend | base |
 | 3 | volatility | base |
-| 4 | collective_anomaly | anomaly |
-| 5 | contextual_anomaly | anomaly |
-| 6 | mean_shift | anomaly |
-| 7 | point_anomaly | anomaly |
-| 8 | trend_shift | anomaly |
-| 9 | variance_shift | anomaly |
+| 4 | collective_anomaly | anomali |
+| 5 | contextual_anomaly | anomali |
+| 6 | mean_shift | anomali |
+| 7 | point_anomaly | anomali |
+| 8 | trend_shift | anomali |
+| 9 | variance_shift | anomali |
 
-**Training methodology** (original repo): For each model, training data was
-built with **N=1320 positive + N=1320 negative samples**, drawn via
-leaf-balanced sampling across all 39 source groups. Positive sources were
-the groups where the target class is present (e.g., for `mean_shift`, the
-positive groups are 7, 12, 16, 20, 24, 29, 33, 37). For each model,
-LightGBM, XGBoost, and MLP were trained; the one with highest **validation F1**
-was saved.
+**Training metodolojisi** (orijinal repo): Her model için, 39 kaynak gruptan
+leaf-balanced sampling ile **N=1320 pozitif + N=1320 negatif örnek** olacak
+şekilde training verisi kurulmuştur. Pozitif kaynaklar hedef sınıfın mevcut
+olduğu gruplardır (örneğin `mean_shift` için pozitif gruplar 7, 12, 16, 20,
+24, 29, 33, 37'dir). Her model için LightGBM, XGBoost ve MLP eğitilmiş; en
+yüksek **validation F1** olan kaydedilmiştir.
 
-**Output at inference:** 10 probabilities. These become the **next 10
-components** of the meta-feature vector (indices 9–18).
+**Inference'da çıktı:** 10 olasılık. Bunlar meta-feature vektörünün **sonraki
+10 bileşenini** (indeks 9–18) oluşturur.
 
-**Why retained unchanged:** The new ensemble is well-calibrated for
-base+anomaly combinations (groups 11–39 reach 95.9% in-distribution
-on these models alone). However, it exhibits **overly confident
-false positives** on pure base types (groups 1–4): on a pure stationary
-series, it may still produce `P(point_anomaly) = 0.55` and issue a
-spurious anomaly. The downstream stacking + routing layers address this.
+**Neden değiştirilmeden korundu:** Yeni ensemble base+anomali kombinasyonları
+için iyi kalibre edilmiştir (gruplar 11–39 sadece bu modellerle
+in-distribution %95.9'a ulaşır). Ancak saf base tiplerinde (gruplar 1–4)
+**aşırı güvenli false positive'ler** sergiler: saf bir stationary seride,
+`P(point_anomaly) = 0.55` üretebilir ve hatalı anomali çıkarabilir. Downstream
+stacking + routing katmanları bunu giderir.
 
 ---
 
-## Component 4 — Stationary Detector Gate
+## Bileşen 4 — Stationarity Detector Gate
 
-**Source:** Loaded from `../stationary detector ml/trained_models v2/`.
-A separate binary classifier distinguishing stationary (class 0) from
-non-stationary (class 1).
+**Kaynak:** `../stationary detector ml/trained_models v2/` dizininden
+yüklenir. Stationary (sınıf 0) ile non-stationary (sınıf 1) arasında ayrım
+yapan ayrı bir binary sınıflandırıcı.
 
-**Critical distinction:** Unlike Components 2 and 3 which use tsfresh
-features, **this detector uses custom 25 hand-engineered features**
-purpose-built for stationarity testing:
+**Kritik ayrım:** tsfresh feature kullanan Bileşen 2 ve 3'ün aksine, **bu
+detector stationarity testi için özel tasarlanmış 25 el-işçiliği feature
+kullanır**:
 
 ```
-Feature family                 # features
+Feature ailesi                 # feature
 ─────────────────────────────────────────
-Basic statistics               13
+Temel istatistikler            13
   mean, std, var, min, max, range,
   q25, median, q75, iqr,
   skewness, kurtosis, cv
-First/second differences       5
+Birinci/ikinci farklar         5
   diff1_{mean, std, var},
   diff2_{mean, std}
-Rolling window stats           3
+Rolling window istatistikleri  3
   rolling_mean_std,
   rolling_std_mean, rolling_std_std
 Autocorrelation                2
   autocorr_lag1, autocorr_lag10
-Peak analysis                  2
+Peak analizi                   2
   num_peaks, zero_crossing_rate
 ```
 
-These features are **selected specifically to detect stationarity**:
-for instance `rolling_std_std` captures whether the series has stable
-variance over time; `autocorr_lag10` captures short-range memory effects.
+Bu feature'lar **stationarity'yi özel olarak tespit etmek için seçilmiştir**:
+örneğin `rolling_std_std` serinin zaman içinde stabil varyansa sahip olup
+olmadığını yakalar; `autocorr_lag10` kısa-menzilli memory etkilerini yakalar.
 
-**Why this approach over tsfresh:** Empirically, tsfresh's 777 features
-include many aggregate statistics that are insensitive to brief localized
-changes. For a stationary series with a single point anomaly added, tsfresh
-still classifies it as stationary because the overall distribution is
-barely perturbed. The custom features — especially `num_peaks` and
-`rolling_std_std` — are more sensitive to these localized perturbations.
+**Neden tsfresh yerine bu yaklaşım:** Ampirik olarak, tsfresh'in 777
+feature'ı brief lokal değişikliklere duyarsız birçok aggregate istatistik
+içerir. Tek bir point anomaly eklenmiş stationary bir seri için, tsfresh hâlâ
+onu stationary olarak sınıflandırır çünkü genel dağılım çok az bozulur. Özel
+feature'lar — özellikle `num_peaks` ve `rolling_std_std` — bu lokal
+bozulmalara daha duyarlıdır.
 
-**Training methodology** (original repo): Binary classification on
-a balanced training set (stationary vs non_stationary), with
-LightGBM, XGBoost, MLP, Decision Tree, Random Forest, Extra Trees,
-and MLPFast all evaluated. **XGBoost** won with **F1 = 0.881** on the
-held-out test split.
+**Training metodolojisi** (orijinal repo): Balanced training set üzerinde
+binary sınıflandırma (stationary vs non_stationary); LightGBM, XGBoost, MLP,
+Decision Tree, Random Forest, Extra Trees ve MLPFast değerlendirilmiştir.
+**XGBoost**, held-out test split'te **F1 = 0.881** ile kazanmıştır.
 
-**Output at inference:** A single probability `P(stationary)`.
+**Inference'da çıktı:** Tek bir olasılık `P(stationary)`.
 
-**Role in pipeline:** Serves as a **high-precision outer gate**. If
-`P(stationary) ≥ 0.92`, the pipeline shortcuts the downstream components
-and directly emits `("stationary", [])`. This threshold was tuned via
-grid search to maximize full-match count while avoiding false overrides
-on groups 5–10 (stationary base with anomaly).
+**Pipeline'daki rolü:** **Yüksek-precision outer gate** olarak hizmet eder.
+Eğer `P(stationary) ≥ 0.92` ise, pipeline downstream bileşenleri kısa
+devre yapar ve doğrudan `("stationary", [])` üretir. Bu threshold, gruplar
+5–10'da (stationary base + anomali) false override'lardan kaçınarak full-match
+sayısını maksimize etmek için grid search ile ayarlanmıştır.
 
 ---
 
-## Component 5 — Single/Combination Router
+## Bileşen 5 — Tekli/Kombinasyon Router
 
-**Role:** Before committing to the full combination decision, the router
-provides a **second-opinion** on whether the series is a pure single
-pattern or a combination of base + anomaly.
+**Rol:** Tam kombinasyon kararına geçmeden önce router, serinin saf bir
+tekli pattern mi yoksa base + anomali kombinasyonu mu olduğu hakkında
+**ikinci bir görüş** sunar.
 
-**Training setup:**
-- **Positive (combination = 1):** Groups 5–39 (all groups with at least
-  one anomaly or non-stationary base)
-- **Negative (single = 0):** Groups 1–4 (pure base types)
-- **Training data:** 19,500 samples (500 per group × 39 groups),
+**Training kurulumu:**
+- **Pozitif (combo = 1):** Gruplar 5–39 (en az bir anomaliye veya
+  non-stationary base'e sahip tüm gruplar)
+- **Negatif (single = 0):** Gruplar 1–4 (saf base tipler)
+- **Training verisi:** 19,500 örnek (500 grup başına × 39 grup),
   leaf-balanced
-- **Feature representation:** The **full 810-dim meta-vector** of
-  Component 6 (see below), not just tsfresh features
-- **Models:** XGBoost (500 trees, max_depth=6, lr=0.05) and LightGBM
-  (num_leaves=63, max_depth=7) trained independently
-- **Test metric:** Ensemble F1 = **0.978** on held-out 20% split
+- **Feature gösterimi:** Bileşen 6'nın **tam 810-boyutlu meta-vektörü**
+  (aşağıya bakınız), sadece tsfresh feature'ları değil
+- **Modeller:** XGBoost (500 ağaç, max_depth=6, lr=0.05) ve LightGBM
+  (num_leaves=63, max_depth=7) bağımsız olarak eğitilmiştir
+- **Test metriği:** held-out %20 split'te Ensemble F1 = **0.978**
 
-**Inference:** `P(combination) = 0.5 × XGB + 0.5 × LGB` probabilities.
+**Inference:** `P(combo) = 0.5 × XGB + 0.5 × LGB` olasılıklar.
 
-**Routing decision:**
+**Routing kararı:**
 ```
-IF P(combination) < 0.30:
-    Route to SINGLE branch → return (base_meta_argmax, [])
-ELSE:
-    Route to COMBINATION branch → full anomaly evaluation
+EĞER P(combo) < 0.30:
+    SINGLE dalına yönlendir → (base_meta_argmax, []) döndür
+DEĞILSE:
+    COMBO dalına yönlendir → tam anomali değerlendirmesi
 ```
 
-The threshold **0.30** was selected via grid search. A lower threshold
-biases the system toward the combination branch, which is desirable
-because the combination branch has robust mechanisms (threshold calibration,
-blending) to prevent false positives, while falling through to the single
-branch loses valid anomaly detections.
+**0.30** threshold'u grid search ile seçilmiştir. Daha düşük bir threshold
+sistemi kombinasyon dalına yönlendirme eğilimi gösterir ki bu arzu edilen
+durumdur: kombinasyon dalının false positive'leri önlemek için güçlü
+mekanizmaları vardır (threshold kalibrasyonu, blending), oysa tekli dala
+düşmek geçerli anomali tespitlerini kaybettirir.
 
 ---
 
-## Component 6 — Stacking Meta-Learners
+## Bileşen 6 — Stacking Meta-Learner'lar
 
-**Purpose:** Learn how to combine the opinions of the old ensemble (9),
-the new ensemble (10), and raw tsfresh features into a final prediction.
-This is the **central innovation** of the project: rather than hand-coding
-rules for when to trust which ensemble, we train models to do it.
+**Amaç:** Eski ensemble'ın (9), yeni ensemble'ın (10) ve ham tsfresh
+feature'larının görüşlerini nihai bir tahmine nasıl birleştireceğini öğrenmek.
+Bu projenin **merkezî yeniliğidir**: hangi ensemble'a ne zaman güveneceğimize
+dair kurallar elde kodlamak yerine, bunu yapacak modeller eğitiriz.
 
-### Meta-Feature Vector (810 dimensions)
+### Meta-Feature Vektörü (810 boyut)
 
-Constructed for every sample:
+Her örnek için inşa edilir:
 
 ```
-Dimension   Source                               Description
+Boyut        Kaynak                                    Açıklama
 ────────────────────────────────────────────────────────────────
-  0 –   8   Old ensemble probabilities           9 binaries
-  9 –  18   New ensemble probabilities           10 binaries (4 base + 6 anomaly)
- 19 –  32   Derived meta-features                14 engineered stats
- 33 – 809   Raw tsfresh features (standardized)  777 features
+  0 –   8    Eski ensemble olasılıkları                9 binary
+  9 –  18    Yeni ensemble olasılıkları                10 binary (4 base + 6 anom)
+ 19 –  32    Türetilmiş meta-feature'lar               14 engineered stat
+ 33 – 809    Ham tsfresh feature'ları (standardized)   777 feature
 ────────────────────────────────────────────────────────────────
-           TOTAL                                  810 dimensions
+            TOPLAM                                       810 boyut
 ```
 
-### 14 Derived Meta-Features
+### 14 Türetilmiş Meta-Feature
 
-Computed from the 19 raw ensemble probabilities to provide richer signal:
+Daha zengin sinyal sağlamak için 19 ham ensemble olasılığından hesaplanır:
 
-1. `max_old_base` — highest prob among old ensemble's base classes
-2. `argmax_old_base` — which base class old ensemble prefers
-3. `max_old_anomaly` — highest prob among old ensemble's anomaly classes
-4. `n_old_anomaly_above_0.5` — count of old anomaly classes firing
-5. `max_new_base` — new ensemble's max base prob
-6. `argmax_new_base` — new ensemble's preferred base index
-7. `max_new_anomaly` — new ensemble's max anomaly prob
-8. `n_new_anomaly_above_0.5` — count of new anomalies firing
-9. `base_agreement` — do old and new agree on base type? (0/1)
-10. `base_confidence_gap` — new's max base prob minus its 2nd-max
-11. `anomaly_entropy` — mean binary entropy of new's 6 anomaly probs
-12. `old_new_anomaly_correlation` — Pearson correlation of the two
-    ensembles' anomaly probability vectors
-13. `total_new_anomaly_signal` — sum of all new anomaly probs
-14. `total_old_anomaly_signal` — sum of all old anomaly probs
+1. `max_old_base` — eski ensemble'ın base sınıfları arasında en yüksek prob
+2. `argmax_old_base` — eski ensemble'ın tercih ettiği base sınıf
+3. `max_old_anomaly` — eski ensemble'ın anomali sınıfları arasında en yüksek prob
+4. `n_old_anomaly_above_0.5` — ateşlenen eski anomali sınıflarının sayısı
+5. `max_new_base` — yeni ensemble'ın max base prob'u
+6. `argmax_new_base` — yeni ensemble'ın tercih ettiği base indeks
+7. `max_new_anomaly` — yeni ensemble'ın max anomali prob'u
+8. `n_new_anomaly_above_0.5` — ateşlenen yeni anomalilerin sayısı
+9. `base_agreement` — eski ve yeni base type konusunda anlaşıyor mu? (0/1)
+10. `base_confidence_gap` — yeni'nin max base prob'u eksi ikinci max'ı
+11. `anomaly_entropy` — yeni'nin 6 anomali prob'unun ortalama binary entropy'si
+12. `old_new_anomaly_correlation` — iki ensemble'ın anomali olasılık
+    vektörlerinin Pearson korelasyonu
+13. `total_new_anomaly_signal` — tüm yeni anomali prob'larının toplamı
+14. `total_old_anomaly_signal` — tüm eski anomali prob'larının toplamı
 
-These features let the meta-learner detect **ensemble disagreement**,
-**confidence levels**, and **signal strength patterns** — invaluable
-for handling edge cases.
+Bu feature'lar meta-learner'a **ensemble disagreement**, **confidence
+seviyeleri** ve **sinyal gücü desenlerini** algılama imkânı verir — edge
+case'lerin yönetimi için paha biçilemezdir.
 
 ### Base-Type Meta-Learner
 
-A **4-class XGBoost + LightGBM ensemble** predicting {stationary,
-deterministic_trend, stochastic_trend, volatility}.
+{stationary, deterministic_trend, stochastic_trend, volatility} tahmini
+yapan **4-sınıflı XGBoost + LightGBM ensemble**.
 
-**Hyperparameters:**
+**Hyperparameter'lar:**
 
-| Parameter | Value |
+| Parametre | Değer |
 |---|---|
 | n_estimators | 500 |
 | learning_rate | 0.05 |
@@ -423,214 +423,214 @@ deterministic_trend, stochastic_trend, volatility}.
 | class_weight | balanced |
 | num_class | 4 |
 
-LightGBM uses the same hyperparameters with `num_leaves=63` and
-`max_depth=7`. **Ensemble prediction:**
+LightGBM aynı hyperparameter'lar ile `num_leaves=63` ve `max_depth=7`
+kullanır. **Ensemble tahmini:**
 `proba = 0.5 × XGB.predict_proba + 0.5 × LGB.predict_proba`
 
-**Training data:** 19,500 meta-vectors with 4-class base labels,
-stratified 80/20 train/test split.
-**Test accuracy: 96.85 %, weighted F1: 96.85 %.**
+**Training verisi:** 19,500 meta-vektör, 4-sınıflı base etiketi ile;
+stratified %80/%20 train/test split.
+**Test accuracy: %96.85, weighted F1: %96.85.**
 
-### Anomaly Meta-Learners (6 × binary)
+### Anomali Meta-Learner'lar (6 × binary)
 
-One XGBoost + LightGBM ensemble per anomaly type: collective, contextual,
+Her anomali tipi için bir XGBoost + LightGBM ensemble: collective, contextual,
 mean_shift, point, trend_shift, variance_shift.
 
-**Critical oversampling:** Groups 5–10 (stationary + single anomaly)
-are **tripled in the training set** before fitting. This is because
-these groups are the most nuanced cases — a stationary series with
-one subtle anomaly — and need proportionally more exposure.
+**Kritik oversampling:** Gruplar 5–10 (stationary + tek anomali) fit
+edilmeden önce training set'te **üç katına çıkarılır**. Bunun nedeni bu
+grupların en nüanslı vakalar olmasıdır — bir subtle anomalili stationary
+seri — ve bu nedenle orantısal olarak daha fazla maruziyet gerektirirler.
 
-**Per-anomaly F1 scores on held-out test:**
+**Per-anomaly F1 skorları (held-out test'te):**
 
-| Anomaly | F1 | Accuracy |
+| Anomali | F1 | Accuracy |
 |---|---|---|
-| collective_anomaly | 0.9127 | 96.6% |
-| contextual_anomaly | 0.9988 | 99.99% |
-| mean_shift | 0.9211 | 96.9% |
-| point_anomaly | 0.9518 | 98.1% |
-| trend_shift | 0.9863 | 99.9% |
-| variance_shift | 0.9297 | 97.2% |
+| collective_anomaly | 0.9127 | %96.6 |
+| contextual_anomaly | 0.9988 | %99.99 |
+| mean_shift | 0.9211 | %96.9 |
+| point_anomaly | 0.9518 | %98.1 |
+| trend_shift | 0.9863 | %99.9 |
+| variance_shift | 0.9297 | %97.2 |
 
 ---
 
-## Component 7 — Blended Probability Decision
+## Bileşen 7 — Blended Probability Kararı
 
-**Purpose:** In the combination branch, each anomaly's final probability
-is a **weighted combination** of the meta-learner's prediction and the
-new ensemble's direct prediction.
+**Amaç:** Kombinasyon dalında, her anomalinin nihai olasılığı meta-learner'ın
+tahmininin ve yeni ensemble'ın doğrudan tahmininin **ağırlıklı kombinasyonudur**.
 
-**Formula for anomaly k:**
+**Anomali k için formül:**
 ```
 blended_prob_k = α_k × meta_prob_k + (1 - α_k) × new_ensemble_prob_k
 ```
 
-**Decision rule:**
+**Karar kuralı:**
 ```
-anomaly_k detected  ⇔  blended_prob_k ≥ threshold_k
+anomali_k algılandı  ⇔  blended_prob_k ≥ threshold_k
 ```
 
-### Per-Anomaly Tuned Parameters
+### Per-Anomaly Tuned Parametreler
 
-These were found via **joint grid search** maximizing FULL match count
-on the training set, with each `(α, threshold)` pair searched over:
+Bunlar training setinde FULL match sayısını maksimize eden **joint grid
+search** ile bulunmuştur; her `(α, threshold)` çifti ayrı ayrı aranmıştır:
 
-| Anomaly | α (blend weight) | Threshold | Rationale |
+| Anomali | α (blend ağırlığı) | Threshold | Gerekçe |
 |---|---|---|---|
-| collective_anomaly | 0.85 | 0.73 | Meta dominates; high threshold suppresses FPs on groups 5–10 |
-| contextual_anomaly | 0.70 | 0.69 | Equal importance; strong separation already |
-| mean_shift | 0.90 | 0.49 | Meta dominates; standard threshold works |
-| point_anomaly | 0.70 | 0.69 | Balance; high threshold critical to avoid spike FPs |
-| trend_shift | 0.90 | 0.73 | Meta dominates; high threshold for clarity |
-| variance_shift | 0.70 | 0.69 | Balance; high threshold reduces stochastic trend confusion |
+| collective_anomaly | 0.85 | 0.73 | Meta baskın; yüksek threshold grup 5–10'da FP'leri bastırır |
+| contextual_anomaly | 0.70 | 0.69 | Eşit önem; zaten güçlü ayrışma var |
+| mean_shift | 0.90 | 0.49 | Meta baskın; standart threshold yeterli |
+| point_anomaly | 0.70 | 0.69 | Denge; spike FP'lerden kaçınmak için yüksek threshold kritik |
+| trend_shift | 0.90 | 0.73 | Meta baskın; netlik için yüksek threshold |
+| variance_shift | 0.70 | 0.69 | Denge; stochastic trend karışıklığını azaltmak için yüksek threshold |
 
-**Why blend?** The new ensemble's direct probability provides a "sanity check"
-for cases where the meta-learner may have been over-confident or
-under-confident due to feature interactions. Blending preserves valid signal
-from both sources.
+**Neden blend?** Yeni ensemble'ın doğrudan olasılığı, meta-learner'ın
+feature etkileşimleri nedeniyle aşırı güvenli veya yetersiz güvenli olabileceği
+vakalar için bir "sağlama kontrolü" sağlar. Blending her iki kaynaktan da
+geçerli sinyali korur.
 
 ---
 
 ## Inference Pipeline
 
-Given a raw CSV file:
+Ham bir CSV dosyası verildiğinde:
 
 ```python
-# ─── Stage A: Feature extraction ─────────────────────────────────────────
-series = read_csv_values(csv_path)                 # raw values
-if len(series) < MIN_SERIES_LENGTH:                # minimum 50 timesteps
+# ─── Aşama A: Feature extraction ─────────────────────────────────────────
+series = read_csv_values(csv_path)                 # ham değerler
+if len(series) < MIN_SERIES_LENGTH:                # minimum 50 timestep
     return ERROR
 
-tsfresh_features = tsfresh.extract(series)         # 777-dim
+tsfresh_features = tsfresh.extract(series)         # 777-boyutlu
 tsfresh_scaled   = tsfresh_scaler.transform(tsfresh_features)  # standardized
 
-# ─── Stage B: Stationarity gate ──────────────────────────────────────────
+# ─── Aşama B: Stationarity gate ──────────────────────────────────────────
 p_stationary = stat_detector_v2.predict_proba(
     extract_25_custom_features(series)
-)[0]                                               # single scalar
+)[0]                                               # tek skaler
 
-# ─── Stage C: Old ensemble ───────────────────────────────────────────────
+# ─── Aşama C: Eski ensemble ──────────────────────────────────────────────
 old_probs = [
     old_ensemble[class_k].predict_proba(tsfresh_features)[0, 1]
-    for class_k in OLD_CLASSES                     # 9 classes
-]                                                  # 9 probabilities
+    for class_k in OLD_CLASSES                     # 9 sınıf
+]                                                  # 9 olasılık
 
-# ─── Stage D: New ensemble ───────────────────────────────────────────────
+# ─── Aşama D: Yeni ensemble ──────────────────────────────────────────────
 new_probs = [
     new_ensemble[model_k].predict_proba(tsfresh_features)[0, 1]
-    for model_k in NEW_ALL_MODELS                  # 10 models
-]                                                  # 10 probabilities
+    for model_k in NEW_ALL_MODELS                  # 10 model
+]                                                  # 10 olasılık
 
-# ─── Stage E: Meta-feature construction ──────────────────────────────────
-derived = compute_derived_features(old_probs, new_probs)    # 14-dim
-meta_x  = concat(old_probs, new_probs, derived, tsfresh_scaled)  # 810-dim
+# ─── Aşama E: Meta-feature inşası ────────────────────────────────────────
+derived = compute_derived_features(old_probs, new_probs)    # 14-boyutlu
+meta_x  = concat(old_probs, new_probs, derived, tsfresh_scaled)  # 810-boyutlu
 
-# ─── Stage F: Stationarity gate check ────────────────────────────────────
+# ─── Aşama F: Stationarity gate kontrolü ─────────────────────────────────
 if p_stationary >= 0.92:
-    return ("stationary", [])                       # Override path
+    return ("stationary", [])                       # Override yolu
 
-# ─── Stage G: Router decision ────────────────────────────────────────────
+# ─── Aşama G: Router kararı ──────────────────────────────────────────────
 p_combo = 0.5 * router_xgb.predict_proba(meta_x)[0, 1] \
         + 0.5 * router_lgb.predict_proba(meta_x)[0, 1]
 
-# ─── Stage H: Base type prediction ───────────────────────────────────────
-base_xgb_p = base_meta_xgb.predict_proba(meta_x)[0]    # 4-class probs
+# ─── Aşama H: Base type tahmini ──────────────────────────────────────────
+base_xgb_p = base_meta_xgb.predict_proba(meta_x)[0]    # 4-sınıflı prob
 base_lgb_p = base_meta_lgb.predict_proba(meta_x)[0]
 base_idx   = argmax(0.5 * base_xgb_p + 0.5 * base_lgb_p)
 base_type  = BASE_LABELS[base_idx]
 
-# ─── Stage I: Routing branches ───────────────────────────────────────────
+# ─── Aşama I: Routing dalları ────────────────────────────────────────────
 if p_combo < 0.30:
-    return (base_type, [])                          # Single path
+    return (base_type, [])                          # Tekli yol
 
-# ─── Stage J: Anomaly detection via blended probability ──────────────────
+# ─── Aşama J: Blended probability ile anomali tespiti ────────────────────
 anomalies = []
 for k, anomaly_name in enumerate(ANOM_LABELS):
     meta_prob = 0.5 * anom_meta[anomaly_name].xgb.predict_proba(meta_x)[0, 1] \
               + 0.5 * anom_meta[anomaly_name].lgb.predict_proba(meta_x)[0, 1]
-    new_prob  = new_probs[k + 4]                    # 4 base + k anomaly
+    new_prob  = new_probs[k + 4]                    # 4 base + k anomali
     blended   = ALPHA[anomaly_name] * meta_prob \
               + (1 - ALPHA[anomaly_name]) * new_prob
     if blended >= THRESHOLD[anomaly_name]:
         anomalies.append(anomaly_name)
 
-return (base_type, anomalies)                       # Combination path
+return (base_type, anomalies)                       # Kombinasyon yolu
 ```
 
-**Total inference cost per sample:**
-- tsfresh extraction: ~0.1–0.2 sec (bulk dominated)
-- Custom 25-feature extraction: ~0.01 sec
-- 9 + 10 = 19 binary predictions: negligible
-- Router: 2 predictions, negligible
-- Base: 2 predictions
-- Anomaly: 12 predictions (6 × XGB+LGB)
+**Örnek başına toplam inference maliyeti:**
+- tsfresh extraction: ~0.1–0.2 sn (bulk dominant)
+- Özel 25-feature extraction: ~0.01 sn
+- 9 + 10 = 19 binary tahmin: ihmal edilebilir
+- Router: 2 tahmin, ihmal edilebilir
+- Base: 2 tahmin
+- Anomali: 12 tahmin (6 × XGB+LGB)
 
-Total: dominated by tsfresh (≈ 150 ms for a 1000-sample series).
+Toplam: tsfresh baskın (1000-sample'lık bir seri için ≈ 150 ms).
 
 ---
 
-## Training Data and Balanced Sampling
+## Training Verisi ve Dengeli Sampling
 
 ### Meta-Learner Training
 
-- **Total samples: 19,500** (500 per group × 39 groups)
-- **Leaf-balanced sampling:** within each group, samples drawn
-  proportionally from each leaf sub-directory to ensure coverage of
-  all parameter combinations (noise levels, series lengths, etc.)
-- **Stratified train/test split: 80% / 20%**
-- **Oversampling for hard groups:** Groups 5–10 (stationary + single
-  anomaly) are **tripled** in the anomaly meta-learner training, so
-  the model has stronger signal for these subtle cases
+- **Toplam örnek: 19,500** (grup başına 500 × 39 grup)
+- **Leaf-balanced sampling:** her grup içinde, tüm parametre
+  kombinasyonlarının (gürültü seviyesi, seri uzunluğu vb.) kapsamını
+  sağlamak için her leaf alt-dizinden orantılı olarak örnek çekilir
+- **Stratified train/test split: %80 / %20**
+- **Zor gruplar için oversampling:** Gruplar 5–10 (stationary + tek anomali)
+  anomali meta-learner training'inde **üç katına çıkarılır**, böylece
+  model bu subtle vakalar için daha güçlü sinyale sahip olur
 
-### Evaluation Data
+### Değerlendirme Verisi
 
-- **Total samples: 4,400**
-- **Per group:** 10 samples per leaf directory
-- **Random seed:** 42, deterministic for reproducibility
-- **Non-overlapping with training data:** evaluation uses different
-  random-sampled CSVs than meta training
+- **Toplam örnek: 4,400**
+- **Grup başına:** leaf dizin başına 10 örnek
+- **Random seed:** 42, tekrarlanabilirlik için deterministik
+- **Training verisi ile çakışmaz:** değerlendirme meta training'den farklı
+  random-sampled CSV'ler kullanır
 
 ---
 
-## Hyperparameter Search and Calibration
+## Hyperparameter Arama ve Kalibrasyon
 
-Three hyperparameter families were jointly tuned via **exhaustive grid
-search on cached meta-features** (the "fast grid" approach):
+Üç hyperparameter ailesi **cached meta-feature'lar üzerinde exhaustive grid
+search** ile birlikte tuned edilmiştir ("fast grid" yaklaşımı):
 
 ### Stationarity Gate Threshold
-- **Range searched:** 0.85 – 1.01 in increments of 0.01
-- **Best value:** 0.92 (v2 detector)
-- **Selected by:** maximum FULL match count
+- **Aranan aralık:** 0.85 – 1.01, 0.01 artışlarla
+- **En iyi değer:** 0.92 (v2 detector)
+- **Seçim kriteri:** maksimum FULL match sayısı
 
 ### Router Threshold
-- **Range searched:** 0.25 – 0.50 in increments of 0.01
-- **Best value:** 0.30
-- **Selected by:** maximum FULL match count
+- **Aranan aralık:** 0.25 – 0.50, 0.01 artışlarla
+- **En iyi değer:** 0.30
+- **Seçim kriteri:** maksimum FULL match sayısı
 
-### Per-Anomaly (α, Threshold) Pairs
-For each of the 6 anomalies, a 2-D grid:
-- **α:** [0.3, 0.5, 0.7, 0.8, 0.85, 0.9, 0.95, 1.0] (8 values)
-- **Threshold:** 0.25 – 0.75 in 0.02 increments (~25 values)
-- Total per anomaly: 8 × 25 = 200 combinations
-- **Sequential refinement:** each anomaly tuned in order (collective →
-  contextual → mean_shift → point → trend_shift → variance_shift), with
-  each step using the previously-tuned values as the baseline
+### Per-Anomaly (α, Threshold) Çiftleri
+6 anomalinin her biri için 2-B grid:
+- **α:** [0.3, 0.5, 0.7, 0.8, 0.85, 0.9, 0.95, 1.0] (8 değer)
+- **Threshold:** 0.25 – 0.75, 0.02 artışlarla (~25 değer)
+- Anomali başına toplam: 8 × 25 = 200 kombinasyon
+- **Sıralı iyileştirme:** her anomali sırayla tuned edilir (collective →
+  contextual → mean_shift → point → trend_shift → variance_shift); her adım
+  önceki tuned değerleri baseline olarak kullanır
 
-Final tuned parameters reported in [Component 7](#component-7--blended-probability-decision).
+Nihai tuned parametreler [Bileşen 7](#bileşen-7--blended-probability-kararı)
+bölümünde rapor edilmiştir.
 
-### Fast Grid Infrastructure
-- **`cache_eval.py`**: Computes all 19 ensemble probabilities, meta-features,
-  and stationarity detector probabilities for all 4,400 evaluation samples
-  ONCE and stores as `.npz` (~22 MB). Subsequent grid searches take
-  seconds per combination instead of minutes.
-- **`fast_grid*.py`**: Multi-phase grid search scripts operating on the
-  cached features
+### Fast Grid Altyapısı
+- **`cache_eval.py`**: Tüm 4,400 değerlendirme örneği için 19 ensemble
+  olasılığı, meta-feature ve stationarity detector olasılığını BİR KEZ
+  hesaplar ve `.npz` olarak saklar (~22 MB). Sonraki grid search'ler
+  dakikalar yerine saniyeler sürer.
+- **`fast_grid*.py`**: Cached feature'lar üzerinde çalışan çok-aşamalı
+  grid search script'leri
 
 ---
 
-## Full Evaluation Results (39 classes)
+## Tam Değerlendirme Sonuçları (39 sınıf)
 
-| # | Group | n | FULL | PART | NONE | FULL % |
+| # | Grup | n | FULL | PART | NONE | FULL % |
 |---|---|---|---|---|---|---|
 | 1 | stationary | 120 | 67 | 49 | 4 | 55.8 |
 | 2 | deterministic_trend | 720 | 674 | 10 | 36 | 93.6 |
@@ -672,148 +672,150 @@ Final tuned parameters reported in [Component 7](#component-7--blended-probabili
 | 38 | volatility + point_anomaly | 10 | 6 | 4 | 0 | 60.0 |
 | 39 | volatility + variance_shift | 10 | 7 | 3 | 0 | 70.0 |
 
-**TOTALS**
-- FULL match: **3,919 / 4,400 (89.07 %)**
-- PARTIAL match: 221 / 4,400 (5.02 %)
-- NO match: 260 / 4,400 (5.91 %)
+**TOPLAMLAR**
+- FULL match: **3,919 / 4,400 (%89.07)**
+- PARTIAL match: 221 / 4,400 (%5.02)
+- NO match: 260 / 4,400 (%5.91)
 
-**Summary statistics:**
-- Perfect groups (100% FULL): **18** (all of groups 15–30 series, 37)
-- Groups ≥ 90% FULL: **28 / 39**
-- Groups ≥ 80% FULL: **33 / 39**
+**Özet istatistikler:**
+- Mükemmel gruplar (%100 FULL): **18** (15–30 serisinin tamamı, 37)
+- Gruplar ≥ %90 FULL: **28 / 39**
+- Gruplar ≥ %80 FULL: **33 / 39**
 
 ---
 
-## Incremental Improvement History
+## Kademeli İyileşme Geçmişi
 
-| # | Checkpoint | Key Contribution | Full % | Δ |
+| # | Kontrol Noktası | Anahtar Katkı | Full % | Δ |
 |---|---|---|---|---|
-| 0 | Baseline (new ensemble only) | Single binary ensemble | 59.80 | — |
-| 1 | + Stacking meta-learner | Combine old + new opinions | 67.80 | +8.00 |
-| 2 | + 777 raw tsfresh features | Unified 810-dim meta-vector | 74.60 | +6.80 |
-| 3 | + Oversample hard groups 5–10 | 3× emphasis in training | 77.00 | +2.40 |
-| 4 | + Context threshold | Base-dependent threshold | 77.50 | +0.50 |
-| 5 | + Dual XGB+LGB ensemble | Different inductive biases | 77.90 | +0.40 |
-| 6 | + Single/Combination router | Route by complexity | 88.50 | +10.60 |
-| 7 | + Stationarity gate | Override via dedicated model | 88.60 | +0.10 |
-| 8 | + Joint (stat, router, α, θ) tuning | Fine parameter search | 89.07 | +0.47 |
-| | **Final** | **Combined pipeline** | **89.07** | **+29.27** |
+| 0 | Baseline (sadece yeni ensemble) | Tek binary ensemble | 59.80 | — |
+| 1 | + Stacking meta-learner | Eski + yeni görüşlerini birleştir | 67.80 | +8.00 |
+| 2 | + 777 ham tsfresh feature | Birleşik 810-boyutlu meta-vektör | 74.60 | +6.80 |
+| 3 | + Zor grupları oversample et (5–10) | Training'de 3× vurgu | 77.00 | +2.40 |
+| 4 | + Context threshold | Base-bağımlı threshold | 77.50 | +0.50 |
+| 5 | + Çift XGB+LGB ensemble | Farklı inductive bias | 77.90 | +0.40 |
+| 6 | + Tekli/Kombinasyon router | Karmaşıklığa göre route | 88.50 | +10.60 |
+| 7 | + Stationarity gate | Özel model ile override | 88.60 | +0.10 |
+| 8 | + Joint (stat, router, α, θ) tuning | İnce parametre arama | 89.07 | +0.47 |
+| | **Nihai** | **Birleşik pipeline** | **89.07** | **+29.27** |
 
 ---
 
-## File Organization and Reproducibility
+## Dosya Organizasyonu ve Tekrarlanabilirlik
 
 ```
 hopefullyprojectfinal/
-├── README.md                    # This document
-├── BEST_RESULTS.md              # Configuration backup
+├── README.md                    # Bu doküman
+├── BEST_RESULTS.md              # Konfigürasyon yedeği
 ├── .gitignore
 │
-├── config.py                    # 39 group paths, class lists, global constants
-├── processor.py                 # tsfresh extraction, ensemble probability computation,
-│                                  derived feature construction, model loading
-├── trainer.py                   # Meta-learner training (base + 6 anomaly + router),
-│                                  oversampling, blend weight learning
-├── evaluator.py                 # Complete evaluation pipeline over 4,400 samples
+├── config.py                    # 39 grup path'i, sınıf listeleri, global sabitler
+├── processor.py                 # tsfresh extraction, ensemble olasılık hesaplaması,
+│                                  türetilmiş feature inşası, model yükleme
+├── trainer.py                   # Meta-learner eğitimi (base + 6 anomali + router),
+│                                  oversampling, blend weight öğrenimi
+├── evaluator.py                 # 4,400 örnek üzerinde tam değerlendirme pipeline
 ├── stat_detector.py             # Stationarity detector v2 wrapper
-├── main.py                      # Pipeline orchestration (--force, --train, --eval)
+├── main.py                      # Pipeline orkestrasyonu (--force, --train, --eval)
 │
-├── cache_eval.py                # Builds evaluation .npz cache (all probabilities)
-├── fast_grid.py                 # Fast grid search on cached features
-├── fast_grid2.py                # Joint (stat × router × blend) search
-├── fast_grid3.py                # Per-anomaly alpha × threshold grid
-├── eval_best.py                 # Print 39-group table for the best configuration
+├── cache_eval.py                # Değerlendirme .npz cache'i inşa eder (tüm olasılıklar)
+├── fast_grid.py                 # Cached feature'lar üzerinde hızlı grid search
+├── fast_grid2.py                # Joint (stat × router × blend) arama
+├── fast_grid3.py                # Per-anomaly alpha × threshold grid'i
+├── eval_best.py                 # En iyi konfigürasyon için 39-grup tablosunu yazdırır
 │
-├── processed_data/              # (gitignored) intermediate caches
-│   ├── meta_X.npy               # 19,500 × 810 training meta-feature matrix
-│   ├── meta_y_base.npy          # 19,500 base type labels
-│   ├── meta_y_anom.npy          # 19,500 × 6 multi-label anomaly indicators
+├── processed_data/              # (gitignored) ara cache'ler
+│   ├── meta_X.npy               # 19,500 × 810 training meta-feature matrisi
+│   ├── meta_y_base.npy          # 19,500 base type etiketi
+│   ├── meta_y_anom.npy          # 19,500 × 6 multi-label anomali göstergesi
 │   ├── tsfresh_scaler.pkl
-│   └── eval_cache.npz           # 4,400 × (all probabilities + meta features)
+│   └── eval_cache.npz           # 4,400 × (tüm olasılıklar + meta feature'lar)
 │
-├── meta_models/                 # (gitignored) trained meta-learners
+├── meta_models/                 # (gitignored) eğitilmiş meta-learner'lar
 │   ├── base_meta.pkl            # {xgb, lgb}
 │   ├── anom_{name}.pkl × 6      # {xgb, lgb}
 │   ├── router.pkl               # {xgb, lgb}
 │   └── blend_weights.pkl        # per-anomaly {alpha, threshold}
 │
-└── results/                     # (gitignored) evaluation outputs
+└── results/                     # (gitignored) değerlendirme çıktıları
     ├── evaluation.json
     └── evaluation_report.md
 ```
 
-### Reproducing Best Result
+### En İyi Sonucun Yeniden Üretilmesi
 
-**Prerequisites:**
+**Gereksinimler:**
 - Python 3.10+
 - `pip install numpy pandas scikit-learn xgboost lightgbm tsfresh joblib tqdm scipy`
-- Sibling directories with pre-trained models:
+- Önceden eğitilmiş modelleri içeren kardeş dizinler:
   - `../tsfresh ensemble/trained_models/`
   - `../ensemble-alldata/trained_models/`
   - `../stationary detector ml/trained_models v2/`
-- `C:\Users\user\Desktop\Generated Data\` for raw CSV data
+- Ham CSV verisi için `C:\Users\user\Desktop\Generated Data\`
 
-**Full pipeline (training + evaluation):**
+**Tam pipeline (training + değerlendirme):**
 ```bash
 python main.py --force
 ```
 
-**Evaluation only (after training):**
+**Sadece değerlendirme (training sonrası):**
 ```bash
 python main.py --eval
 ```
 
-**Grid search on cached features:**
+**Cached feature'lar üzerinde grid search:**
 ```bash
-python cache_eval.py    # ~20 min, runs once
-python fast_grid.py     # ~1 min
-python fast_grid3.py    # ~3 min — finds best (alpha, threshold) per anomaly
-python eval_best.py     # display 39-group table for best config
+python cache_eval.py    # ~20 dk, bir kez çalışır
+python fast_grid.py     # ~1 dk
+python fast_grid3.py    # ~3 dk — her anomali için en iyi (alpha, threshold)'u bulur
+python eval_best.py     # en iyi konfigürasyon için 39-grup tablosunu gösterir
 ```
 
 ---
 
-## External Model References
+## Harici Model Referansları
 
-| Model | Role | Training Paradigm | Source Path |
+| Model | Rol | Training Paradigması | Kaynak Path |
 |---|---|---|---|
-| Old binary ensemble | 9 single-class detectors | tsfresh features, one-vs-rest binaries | `../tsfresh ensemble/` |
-| New binary ensemble | 10 base+anomaly binaries | tsfresh features, balanced binaries | `../ensemble-alldata/` |
-| Stationarity detector v2 | Binary stationary gate | Custom 25 features, XGBoost | `../stationary detector ml/` |
+| Eski binary ensemble | 9 tek-sınıflı detektör | tsfresh feature, one-vs-rest binary'ler | `../tsfresh ensemble/` |
+| Yeni binary ensemble | 10 base+anomali binary | tsfresh feature, balanced binary'ler | `../ensemble-alldata/` |
+| Stationarity detector v2 | Binary stationarity gate | Özel 25 feature, XGBoost | `../stationary detector ml/` |
 
-All three are **reused as pre-trained models** — no retraining was performed
-on any of them for this project. Only the stacking layer (Components 5–7)
-is new.
+Üçü de **önceden eğitilmiş modeller olarak yeniden kullanılır** — bu proje
+için hiçbirinde yeniden eğitim yapılmadı. Sadece stacking katmanı
+(Bileşenler 5–7) yenidir.
 
 ---
 
-## Techniques Used — Academic Summary
+## Kullanılan Teknikler — Akademik Özet
 
-| Technique | Application |
+| Teknik | Uygulama |
 |---|---|
-| **Stacked Generalization** (Wolpert, 1992) | Meta-learner trained on base classifier outputs |
-| **Gradient Boosting Decision Trees** | XGBoost and LightGBM for all tree-based models |
-| **Ensemble Averaging** | XGB + LGB probability combination |
-| **Automated Feature Engineering** | tsfresh for 777 time-series features |
-| **Class Weighting** | Balanced class weights in base meta-learner |
-| **Synthetic Minority Oversampling** | 3× duplication of groups 5–10 in anomaly training |
-| **Hierarchical Classification** | Stationarity gate + single/combination router |
-| **Probability Blending** | Convex combination of meta and base ensemble probabilities |
-| **Per-Context Threshold Calibration** | Per-anomaly tuned thresholds via grid search |
+| **Stacked Generalization** (Wolpert, 1992) | Base classifier çıktıları üzerinde eğitilmiş meta-learner |
+| **Gradient Boosting Decision Trees** | Tüm ağaç-tabanlı modeller için XGBoost ve LightGBM |
+| **Ensemble Averaging** | XGB + LGB olasılık kombinasyonu |
+| **Automated Feature Engineering** | 777 zaman serisi feature için tsfresh |
+| **Class Weighting** | Base meta-learner'da balanced class weight |
+| **Synthetic Minority Oversampling** | Anomali training'inde gruplar 5–10 için 3× tekrar |
+| **Hierarchical Classification** | Stationarity gate + tekli/kombinasyon router |
+| **Probability Blending** | Meta ve base ensemble olasılıklarının convex kombinasyonu |
+| **Per-Context Threshold Calibration** | Grid search ile per-anomaly tuned threshold |
 | **Derived Meta-Features** | Agreement, entropy, confidence gap, correlation |
-| **Data Caching for Grid Search** | Precomputed feature matrices for fast hyperparameter search |
-| **Leaf-Balanced Sampling** | Proportional representation of all sub-parameter combinations |
+| **Data Caching for Grid Search** | Hızlı hyperparameter search için önceden hesaplanmış feature matrisleri |
+| **Leaf-Balanced Sampling** | Tüm alt-parametre kombinasyonlarının orantılı gösterimi |
 
 ---
 
-## Acknowledgments
+## Teşekkürler
 
-This work builds upon three sibling repositories in the `STATIONARY/` project
-family. Each was developed independently with a focused scope; this project
-integrates them into a unified classification system. The meta-learning,
-routing, blending, and calibration layers are contributions of this work.
+Bu çalışma `STATIONARY/` proje ailesindeki üç kardeş repository üzerine
+inşa edilmiştir. Her biri odaklı bir scope ile bağımsız olarak geliştirildi;
+bu proje onları birleşik bir sınıflandırma sistemine entegre eder.
+Meta-learning, routing, blending ve kalibrasyon katmanları bu çalışmanın
+katkılarıdır.
 
 ---
 
-_If you use this work, please cite this repository and the three underlying
-ensembles listed in [External Model References](#external-model-references)._
+_Bu çalışmayı kullanırsanız, lütfen bu repository'yi ve
+[Harici Model Referansları](#harici-model-referansları) bölümünde listelenen
+üç temel ensemble'ı cite edin._
