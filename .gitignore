@@ -19,3 +19,7 @@ results/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local experiments (not for repo)
+new_stat_detector/
+grid_search.py
