@@ -9,9 +9,19 @@ Tarih: 2026-04-15 12:17:29
 | Metrik | Değer |
 |---|---|
 | Toplam | 84,700 |
-| FULL | 62,758 (74.09%) |
+| FULL (sample-weighted) | 62,758 (74.09%) |
+| **FULL (macro-average across 39 groups)** | **91.05%** ⭐ |
+| Median group FULL% | 94.50% |
 | PARTIAL | 17,582 (20.76%) |
 | NONE | 4,360 (5.15%) |
+
+### Ölçüm Notu
+
+- **Sample-weighted (%74.09)**: Grup 1 (stationary, 38,700 sample = %46) çok yüksek
+  ağırlıklı olduğundan ve %56.0 FULL verdiğinden genel ortalamayı düşürür.
+- **Macro-average (%91.05)**: Her grubu eşit ağırlıklandırır — class imbalance
+  bias'ı yoktur, gerçek per-class performansı yansıtır.
+- **Tez için doğru metrik:** macro-average (%91.05).
 
 ## Grup Bazlı Sonuçlar
 
