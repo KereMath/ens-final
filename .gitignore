@@ -8,7 +8,15 @@ processed_data/
 
 # Trained meta models (large)
 meta_models/
+meta_models_811/
+meta_models_g1_oversample/
 router_model/
+
+# Failed experiment integrations (excluded from final pipeline, very large)
+chronos_integration/
+patchtst_integration/
+rocket_integration/
+ts2vec_integration/
 
 # Results
 results/
